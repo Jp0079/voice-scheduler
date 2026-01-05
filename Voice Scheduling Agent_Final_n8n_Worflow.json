@@ -1,0 +1,273 @@
+{
+  "name": "Voice Scheduling Agent Final",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "execute-call",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        112
+      ],
+      "id": "a400c534-1b63-44f4-b8e1-28dfd6772fd0",
+      "name": "Webhook",
+      "webhookId": "ba2491bc-a195-4c9c-a460-40cc68543ab8"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "23978212-e635-4415-a856-f4d7de7632e8",
+              "leftValue": "={{ $json.body.message.toolCallList[0].function.name }}",
+              "rightValue": "check_calendar_availability",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        112
+      ],
+      "id": "1f67a438-ab36-41f8-8953-4a50816ffd12",
+      "name": "The Router"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "pjaipurk@terpmail.umd.edu",
+          "mode": "list",
+          "cachedResultName": "pjaipurk@terpmail.umd.edu"
+        },
+        "timeMin": "={{ $json.body.message.toolCalls[0].function.arguments.startTime }}",
+        "timeMax": "={{ $json.body.message.toolCalls[0].function.arguments.endTime }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        656,
+        16
+      ],
+      "id": "af394811-7e9a-4ab8-8c7f-13347b793671",
+      "name": "Get Meetings",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "FQ7gBkDlHTAoSZDa",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "pjaipurk@terpmail.umd.edu",
+          "mode": "list",
+          "cachedResultName": "pjaipurk@terpmail.umd.edu"
+        },
+        "start": "={{ $json.body.message.toolCalls[0].function.arguments.startTime }}",
+        "end": "={{ $json.body.message.toolCalls[0].function.arguments.endTime }}",
+        "additionalFields": {
+          "summary": "={{ $('Webhook').first().json.body.message.toolCalls[0].function.arguments.meetingTitle }} - {{ $('Webhook').first().json.body.message.toolCalls[0].function.arguments.customerName }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        656,
+        208
+      ],
+      "id": "a03b70cc-1831-4593-ab3f-8fa0a9353f8d",
+      "name": "Create an event",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "FQ7gBkDlHTAoSZDa",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the events\nconst events = items.map(item => item.json);\n\n// 2. Get the Tool Call ID safely\n// We use optional chaining (?.) just in case the structure differs during testing\nconst webhookData = $('Webhook').first().json.body;\nconst toolCallId = webhookData?.message?.toolCalls?.[0]?.id || \"test_tool_id\";\n\n// 3. Extract Timezone\nlet targetTimezone = 'Asia/Calcutta';\ntry {\n    if (webhookData?.message?.call?.assistantOverrides?.variableValues?.user_timezone) {\n        targetTimezone = webhookData.message.call.assistantOverrides.variableValues.user_timezone;\n    }\n} catch (e) {\n    console.log(\"Could not find user_timezone, using default.\");\n}\n\n// Helper function to format with explicit Timezone\nfunction formatTime(isoString, tz) {\n  if (!isoString) return \"Unknown time\";\n  const date = new Date(isoString);\n  return date.toLocaleString('en-US', {\n    timeZone: tz, \n    weekday: 'short', \n    month: 'short', \n    day: 'numeric', \n    hour: 'numeric', \n    minute: '2-digit', \n    hour12: true\n  });\n}\n\nlet resultText = \"\";\n\n// 4. LOGIC FIX: Check if the list is empty OR if the first item is just an empty object {}\nconst hasEvents = events.length > 0 && events[0].start;\n\nif (!hasEvents) {\n    // CASE A: No events found (Free)\n    resultText = \"I checked the calendar. That slot is completely FREE.\";\n} else {\n    // CASE B: Events found (Busy)\n    const busyList = events.map(e => {\n        // Safety check: if a specific event in the list is malformed, skip it\n        if (!e.start) return \"\";\n        \n        const startRaw = e.start.dateTime || e.start.date;\n        const endRaw = e.end.dateTime || e.end.date;\n        \n        const startReadable = formatTime(startRaw, targetTimezone);\n        const endReadable = formatTime(endRaw, targetTimezone);\n        \n        return `${startReadable} to ${endReadable}`;\n    }).filter(t => t !== \"\").join(\"; \"); // Filter removes any empty strings from malformed events\n    \n    resultText = `That time is not available. There are conflicting events: ${busyList}`;\n}\n\nreturn {\n    json: {\n        results: [\n            {\n                toolCallId: toolCallId,\n                result: resultText\n            }\n        ]\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        16
+      ],
+      "id": "a478087f-fcb6-4a27-8f90-a1225a9ef1e0",
+      "name": "Format Check Availability Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the Tool Call ID safely from the Webhook\nconst webhookData = $('Webhook').first().json.body;\nconst toolCallId = webhookData.message.toolCalls[0].id;\n\n// 2. Get the arguments to make the response personal\nconst args = webhookData.message.toolCalls[0].function.arguments;\n\n// 3. Create a success message\nconst resultText = `Success. I have booked the meeting \"${args.meetingTitle}\" for ${args.customerName}. I have sent the invite to your calendar.`;\n\nreturn {\n    json: {\n        results: [\n            {\n                toolCallId: toolCallId,\n                result: resultText\n            }\n        ]\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        208
+      ],
+      "id": "a5b10cd0-6a6f-446e-b81b-2d2f187aabfc",
+      "name": "Format Slot Booking Response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1072,
+        16
+      ],
+      "id": "db3f0954-466c-4452-ae8d-62d1f4c884c5",
+      "name": "Respond to Check Availability"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1072,
+        208
+      ],
+      "id": "10191cc1-47b4-406e-a623-328f2a472094",
+      "name": "Respond to Book a Slot"
+    },
+    {
+      "parameters": {
+        "content": "## Process Web Call",
+        "height": 384,
+        "width": 1488,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "459b2bd8-c56e-4272-947d-c8e376dae0a8",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "The Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "The Router": {
+      "main": [
+        [
+          {
+            "node": "Get Meetings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create an event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Meetings": {
+      "main": [
+        [
+          {
+            "node": "Format Check Availability Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Check Availability Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Check Availability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event": {
+      "main": [
+        [
+          {
+            "node": "Format Slot Booking Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Slot Booking Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Book a Slot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "7127edd6-0a4c-4f6e-9187-bebdb30ba700",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2bf065143f41afd6e1c3b79ce0e169cacaf39136f8b9cd778de935043011d3de"
+  },
+  "id": "0fsxCWFJRlA9mTJI",
+  "tags": []
+}
